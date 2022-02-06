@@ -1,0 +1,370 @@
+#include <FastLED.h>
+#include <WiFi.h>
+#include "time.h"
+#define NUM_LEDS 24
+#define LED_PIN 15
+
+CRGB leds[NUM_LEDS];
+
+uint8_t hue = 0;
+bool pump = true;
+bool fans = true;
+
+
+DEFINE_GRADIENT_PALETTE( Sunset_gp ) {
+    0, 0,  0,  0,
+   20, 5, 69,  193,
+   74, 97,25,  199,
+   122, 255, 2, 2,
+   186, 251, 255, 65,
+   255, 255, 255, 255};
+
+DEFINE_GRADIENT_PALETTE( Sunrise_gp ) {
+  0, 0, 0, 0,
+  20, 255, 3, 3,
+  33, 255, 201, 3,
+  43, 252, 252, 230,
+  84, 255, 255, 240,
+  240, 255, 255, 255,
+  255, 255, 255, 255};
+
+DEFINE_GRADIENT_PALETTE( Day_gp ) {
+  0, 255, 255, 255,
+  35, 235, 238, 242,
+  86, 247, 255, 255,
+  128, 255, 255, 255,
+  201, 229, 245, 244,
+  240, 255, 255, 255,
+  255, 255, 255, 255};
+
+DEFINE_GRADIENT_PALETTE( Night_gp ) {
+  0, 5, 69,  193,
+  15, 0, 0, 0,
+  43, 0, 0, 0,
+  80, 112, 116, 116,
+  112, 163, 168, 168,
+  240, 0, 0, 0,
+  255, 0, 0, 0};
+
+
+CRGBPalette16 sunsetPal = Sunset_gp;
+CRGBPalette16 sunrisePal = Sunrise_gp;
+CRGBPalette16 dayPal = Day_gp;
+CRGBPalette16 nightPal = Night_gp;
+
+//Network credentials
+const char* ssid = "username"; //change these to your network credentials, don't forget to delete it when sharing!
+const char* password = "password";
+
+//NTP server
+const char* ntpServer = "pool.ntp.org";
+
+//GMT Offset
+const long gmtOffset_sec = -21600;
+
+//Daylight savings
+const int daylightOffset_sec = 3600;
+
+//char timeHour[3];
+struct tm timeinfo;
+
+
+
+void setup() {
+  Serial.begin(115200);
+
+  // Connect to Wi-Fi
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected.");
+  
+  // Init and get the time
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  printLocalTime();
+
+  //disconnect WiFi as it's no longer needed
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+
+  FastLED.clear();
+  FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.setBrightness(255);
+  FastLED.setTemperature(CarbonArc);
+  FastLED.setCorrection(TypicalPixelString);
+
+  startupLEDsTest();
+
+
+
+}
+
+void loop() {
+  //strftime(timeHour,3, "%H", &timeinfo);
+
+
+if (timeinfo.tm_hour ==7) {
+    sunrise();
+    pump == true;
+    fans == true;
+  }
+  else if (timeinfo.tm_hour == 18) {
+    sunset();
+    pump == true;
+    fans == false;
+  }
+  else if ((timeinfo.tm_hour >19) && (timeinfo.tm_hour <= 24)|| (timeinfo.tm_hour >0) && (timeinfo.tm_hour <7)){
+    night();
+    pump == false;
+    fans == false;
+  }
+  else {
+    day();
+    pump == true;
+    fans == true;
+  }
+  
+
+  FastLED.show();
+
+}
+
+void printLocalTime(){
+  struct tm timeinfo;
+  if(!getLocalTime(&timeinfo)){
+    Serial.println("Failed to obtain time");
+    return;
+  }
+  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+  Serial.print("Day of week: ");
+  Serial.println(&timeinfo, "%A");
+  Serial.print("Month: ");
+  Serial.println(&timeinfo, "%B");
+  Serial.print("Day of Month: ");
+  Serial.println(&timeinfo, "%d");
+  Serial.print("Year: ");
+  Serial.println(&timeinfo, "%Y");
+  Serial.print("Hour: ");
+  Serial.println(&timeinfo, "%H");
+  Serial.print("Hour (12 hour format): ");
+  Serial.println(&timeinfo, "%I");
+  Serial.print("Minute: ");
+  Serial.println(&timeinfo, "%M");
+  Serial.print("Second: ");
+  Serial.println(&timeinfo, "%S");
+
+  Serial.println("Time variables");
+  char timeHour[3];
+  strftime(timeHour,3, "%H", &timeinfo);
+  Serial.println(timeHour);
+  char timeWeekDay[10];
+  strftime(timeWeekDay,10, "%A", &timeinfo);
+  Serial.println(timeWeekDay);
+  Serial.println();
+}
+
+
+
+void sunset() {
+
+  FastLED.clear();
+  // total sunset length, in minutes
+
+  static const uint8_t sunsetLength = 60;
+
+
+  // how often (in seconds) should the heat color decrease?
+
+  // for the default of 30 minutes, this should be about every 7 seconds
+
+  // 7 seconds x 256 gradient steps = 1,792 seconds = ~30 minutes
+
+  static const uint8_t interval = (sunsetLength * 60) / 256;
+
+
+  // current gradient palette color index
+
+  static uint8_t heatIndex = 255; // start out at 255
+
+
+
+  CRGB color = ColorFromPalette(sunsetPal, heatIndex );
+  FastLED.setBrightness(heatIndex);
+
+
+  // fill the entire strip with the current color
+
+  fill_solid(leds, NUM_LEDS, color);
+
+
+  // slowly increase the heat
+
+  EVERY_N_SECONDS(interval) {
+
+    // stop decrementing at 20, we don't want to overflow back to 255
+
+    if(heatIndex < 20) {
+
+      heatIndex--;
+
+    }
+
+  }
+
+}
+  
+
+
+void day(){
+  FastLED.clear();
+  static uint8_t heatIndex = 255; // start out at 255
+  FastLED.setBrightness(255);
+  CRGB color = ColorFromPalette(dayPal, heatIndex );
+  fill_solid(leds, NUM_LEDS, color);
+
+  EVERY_N_MILLISECONDS(20) {
+
+
+
+    //if(heatIndex < 240) {
+
+      heatIndex++;
+
+ //   }
+    }
+}
+
+
+
+void night() {
+
+  FastLED.clear();
+  // total sunrise length, in minutes
+
+  static const uint8_t nightLength = 240;
+
+
+  // how often (in seconds) should the heat color increase?
+
+  // for the default of 30 minutes, this should be about every 7 seconds
+
+  // 7 seconds x 256 gradient steps = 1,792 seconds = ~30 minutes
+
+  static const uint8_t interval = (nightLength * 60) / 256;
+
+
+  // current gradient palette color index
+
+  static uint8_t heatIndex = 0; // start out at 0
+
+
+  // HeatColors_p is a gradient palette built in to FastLED
+
+  // that fades from black to red, orange, yellow, white
+
+  // feel free to use another palette or define your own custom one  HeatColors_p  ColorFromPalette(HeatColors_p, heatIndex ); RainbowColors_p
+
+  CRGB color = ColorFromPalette(nightPal, heatIndex );
+  FastLED.setBrightness(20);
+
+
+  // fill the entire strip with the current color
+
+  fill_solid(leds, NUM_LEDS, color);
+
+
+  // slowly increase the heat
+
+  EVERY_N_SECONDS(interval) {
+
+    // stop incrementing at 255, we don't want to overflow back to 0
+
+    if(heatIndex < 240) {
+
+      heatIndex++;
+
+    }
+
+  }
+
+}
+
+
+void sunrise() {
+
+  FastLED.clear();
+  // total sunrise length, in minutes
+
+  static const uint8_t sunriseLength = 60;
+
+
+  // how often (in seconds) should the heat color increase?
+
+  // for the default of 30 minutes, this should be about every 7 seconds
+
+  // 7 seconds x 256 gradient steps = 1,792 seconds = ~30 minutes
+
+  static const uint8_t interval = (sunriseLength * 60) / 256;
+
+
+  // current gradient palette color index
+
+  static uint8_t heatIndex = 0; // start out at 0
+
+
+  // HeatColors_p is a gradient palette built in to FastLED
+
+  // that fades from black to red, orange, yellow, white
+
+  // feel free to use another palette or define your own custom one  HeatColors_p  ColorFromPalette(HeatColors_p, heatIndex ); RainbowColors_p
+
+  CRGB color = ColorFromPalette(sunrisePal, heatIndex );
+  FastLED.setBrightness(heatIndex);
+
+
+  // fill the entire strip with the current color
+
+  fill_solid(leds, NUM_LEDS, color);
+
+
+  // slowly increase the heat
+
+  EVERY_N_SECONDS(interval) {
+
+    // stop incrementing at 255, we don't want to overflow back to 0
+
+    if(heatIndex < 240) {
+
+      heatIndex++;
+
+    }
+
+  }
+
+}
+
+void startupLEDsTest() {
+  // startup blink test to confirm LEDs are working.
+  FastLED.setBrightness(32);
+  fill_solid(leds, NUM_LEDS, CRGB(255,0,0));  // fill red
+  FastLED.show();
+  delay(1000);
+  fill_solid(leds, NUM_LEDS, CRGB(0,255,0));  // fill green
+  FastLED.show();
+  delay(1000);
+  fill_solid(leds, NUM_LEDS, CRGB(0,0,255));  // fill blue
+  FastLED.show();
+  delay(1000);
+  fill_solid(leds, NUM_LEDS, CRGB(0,0,0));  // black
+  FastLED.show();
+  delay(1000);
+  FastLED.clear();
+  FastLED.show();
+  FastLED.setBrightness(255);
+
+} //end_startupLEDsTest
